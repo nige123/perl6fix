@@ -1,0 +1,185 @@
+#!/usr/bin/env perl6
+
+#-----------------------------------------------------------------------------------------
+# perl6fix
+#
+# Take the hint from Perl 6 and apply a fix
+#
+# Author:	Nigel Hamilton (2016)
+# Copyright:	Artistic Licence 2.0
+#
+#-----------------------------------------------------------------------------------------
+
+class SourceFile is IO::Path {
+
+    has @!content-lines = self.IO.slurp.lines;
+
+    method append-to-first-matching-line ($append-char, $text-to-match) {
+	return unless my $first-matching-index = @!content-lines.first(rx/$text-to-match/, :k);
+	@!content-lines[$first-matching-index] ~= $append-char;
+	self.save;
+    }
+
+    method swap-characters-on-line ($from-chars, $to-chars, $line-number) {
+	@!content-lines[$line-number - 1].subst-mutate(/$from-chars/, $to-chars);
+	self.save;
+    }
+
+    method save {
+	self.IO.spurt(@!content-lines.join("\n"));
+    }
+}
+
+class Bug {
+    has Str 	    $.line-number;
+    has SourceFile  $.source-file;
+    has Str 	    $.description;
+
+    method location-text {
+	return unless $!description ~~ /^^ '------>' (.*?) '⏏'/;
+	my $location-text = ~$0;
+	my $escape = "\e[";	
+	my $end    = 'm';	
+	$location-text ~~ s:g/$escape\d+?$end//;
+        return $location-text.trim;
+    }
+}
+
+class Fix {
+    has $.prompt;
+    has $.pattern;
+    has	$.action;
+    method apply ($bug) {
+	$!action($bug);
+    }
+    method applies-to ($bug) {
+        return True without $.pattern;
+ 	return $bug.description ~~ $.pattern;
+    }
+}
+
+
+my @fixes = (
+    Fix.new(
+        prompt  => 'add semicolon',
+        pattern => rx/'missing semicolon or comma?'/,
+        action  =>  sub ($bug) {
+	    $bug.source-file.append-to-first-matching-line(';', $bug.location-text);
+        }
+    ),
+    Fix.new(
+        prompt  => 'add comma',
+        pattern => rx/'missing semicolon or comma?'/,
+        action  =>  sub ($bug) {
+	   $bug.source-file.append-to-first-matching-line(',', $bug.location-text);
+        }
+    ),
+    Fix.new(
+        prompt  => 'convert . to ~',
+        pattern => rx/'Unsupported use of . to concatenate strings; in Perl 6 please use ~'/,
+        action  =>  sub ($bug) {
+	    $bug.source-file.swap-characters-on-line('.', '~', $bug.line-number);
+        }
+    ),
+    Fix.new(
+        prompt  => 'convert qr to rx',
+        pattern => rx/'Unsupported use of qr for regex quoting; in Perl 6 please use rx'/,
+        action  => sub ($bug) {
+	    $bug.source-file.swap-characters-on-line('qr', 'rx', $bug.line-number);
+        }
+    ),
+
+    # ... ADD YOUR OWN FIXES HERE ...
+
+    # no pattern, matches all bugs
+    Fix.new(
+        prompt  => 'edit file',
+        action  => sub ($bug) {
+	    # open your favourite editor at the line of the bug ...
+	    shell('vim  +' ~ $bug.line-number ~ ' ' ~ $bug.source-file.path);
+	    #shell('nano +' ~ $bug.line-number ~ ' ' ~ $bug.source-file.path);
+	    #shell('atom ' ~ $bug.source-file.path ~ ':' ~ $bug.line-number);
+	}
+    ),
+    Fix.new(
+        prompt  => 'exit',
+        action  => sub ($bug) { exit; }
+    ),
+);
+
+
+sub find-bug ($perl6-command) {
+
+    my $bug-file = '/tmp/perl6fix.bugs';
+
+    unlink($bug-file);
+
+    # re-run the previous command and capture any STDERR into a file
+    qqx{$perl6-command 2> $bug-file};
+
+    return unless my $bug-description = $bug-file.IO.slurp;
+
+    # can we find a filename and line number?
+    return unless $bug-description ~~ m/^^ 'at' \s+ (.*?) ':' (.*?) $$/;
+
+    my $filename    = ~$0;
+    my $line-number = ~$1;
+
+    return Bug.new(
+        description =>  $bug-description,
+        source-file =>  SourceFile.new($filename),
+        line-number =>  $line-number
+    );
+}
+
+
+sub fix-bugs ($perl6-command-line) {
+
+    my $bug = find-bug($perl6-command-line);
+	
+    unless $bug {
+	say 'No bugs found to fix.'; 
+	exit;
+    }		
+
+    # find a potential list of fixes for this type of bug
+    my @found-fixes = @fixes.grep(*.applies-to($bug));
+
+    say $bug.description;
+    say $bug.source-file.path ~ ' ' ~ $bug.line-number;
+    say 'Suggested fixes found: ';
+
+    my $fix-count = 0;
+
+    for @found-fixes -> $fix {
+	$fix-count++;
+	my $option = ($fix-count == 1)
+	           ?? "*[1] " 	       ~ $fix.prompt
+	           !! " [$fix-count] " ~ $fix.prompt;
+	say '    ' ~ $option;
+    }
+
+    my $answer = prompt('apply fix [1]? ') || 1;
+
+    my $fix = @found-fixes[$answer - 1];
+
+    $fix.apply($bug);
+
+    # look for more bugs! until we're done
+    fix-bugs($perl6-command-line);
+
+}
+
+#| fix bugs found in the previous Perl6 run - call this via a shell alias
+multi sub MAIN ('prev', *@previous-command-args) {
+    exit unless my $previous-command = @previous-command-args.join(' ');
+    exit unless $previous-command.starts-with('perl6');
+    fix-bugs($previous-command);
+}
+
+#| invoke perl6 and try to fix any bugs found
+multi sub MAIN (*@command-args) {
+    exit unless @command-args;
+    my $run-command = 'perl6 ' ~ join(' ', @command-args);
+    fix-bugs($run-command);
+}

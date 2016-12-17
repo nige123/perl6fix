@@ -1,0 +1,90 @@
+Finding flow while coding is one of the joys of programming. 
+
+Encountering simple syntactic bugs, however, can sometimes interrupt flow. A single missing semicolon, for 
+example, can result in a "WAT!?" followed by a "DOH!"
+
+Perl 6 helps you around the code -> run -> fix cycle by identifying the cause and location of a bug 
+and often suggests a solution. Take this program:
+
+say "hello"
+say "world";
+
+When you run it, Perl 6 will suggest what's wrong, where the problem is, and what to do next ...
+
+===SORRY!=== Error while compiling /home/nige/hello-world.pl
+Two terms in a row across lines (missing semicolon or comma?)
+at /home/nige/hello-world.pl:6
+------> say "hello"⏏<EOL>
+
+That helps to keep things flowing. 
+
+Normally, at this point, it's off to your $EDITOR to manually add the semicolon and the cycle repeats.
+
+What if Perl 6 could suggest a fix and apply it for you?
+
+Here is the beginnings of a command-line utility called, perl6fix, that takes the hint from Perl 6 
+and tries to speed up the code -> run -> fix cycle by applying the fix for you.
+
+<hello world example> - screen image
+
+Let's look at the code.
+
+It needs a handle on bug descriptions found in Perl 6 output.
+
+<bug section>
+
+And a way to describe fixes:
+
+<fix section>
+
+And a way to update the source file:
+
+<sourcefile section>
+
+Here is just some of the fixes I encountered while writing this program:
+
+<fixes list>
+
+There's bound to be many more (I'm just starting).
+
+The perl6fix script runs Perl 6, captures STDERR (if there is any), and then looks for matching fixes:
+
+<more code here>
+
+With the help of a shell alias you can even run it on the previous command.
+
+<show terminal>
+
+Just add an alias to your bash or zsh profile. For example:
+
+alias fix='/home/nige/perl6/perl6fix prev $(fc -ln -1)'
+
+<show code for MAIN>
+
+What next? As you can see this is just a start. 
+
+You're welcome to <link to gist>take the script</link> and evolve your own set of automatic Perl 6 fixes. 
+
+You could even adapt the script to apply fixes to Perl 5 or other languages? What about a version 
+using grammars? Or a macro-powered version integrated directly into Perl 6? 
+
+Well maybe that last one is something to look forward to next Christmas!
+
+Hope you have a happy Christmas and a flowing, Perl 6 powered 2017!
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
