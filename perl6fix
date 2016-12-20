@@ -10,6 +10,8 @@
 #
 #-----------------------------------------------------------------------------------------
 
+use JSON::Fast;
+
 class SourceFile is IO::Path {
 
     has @!content-lines = self.IO.slurp.lines;
@@ -31,18 +33,10 @@ class SourceFile is IO::Path {
 }
 
 class Bug {
-    has Str 	    $.line-number;
+    has Int 	    $.line-number;
     has SourceFile  $.source-file;
     has Str 	    $.description;
-
-    method location-text {
-	return unless $!description ~~ /^^ '------>' (.*?) '⏏'/;
-	my $location-text = ~$0;
-	my $escape = "\e[";	
-	my $end    = 'm';	
-	$location-text ~~ s:g/$escape\d+?$end//;
-        return $location-text.trim;
-    }
+    has Str         $.pre-context;
 }
 
 class Fix {
@@ -64,14 +58,14 @@ my @fixes = (
         prompt  => 'add semicolon',
         pattern => rx/'missing semicolon or comma?'/,
         action  =>  sub ($bug) {
-	    $bug.source-file.append-to-first-matching-line(';', $bug.location-text);
+	    $bug.source-file.append-to-first-matching-line(';', $bug.pre-context);
         }
     ),
     Fix.new(
         prompt  => 'add comma',
         pattern => rx/'missing semicolon or comma?'/,
         action  =>  sub ($bug) {
-	   $bug.source-file.append-to-first-matching-line(',', $bug.location-text);
+	   $bug.source-file.append-to-first-matching-line(',', $bug.pre-context);
         }
     ),
     Fix.new(
@@ -108,28 +102,43 @@ my @fixes = (
 );
 
 
-sub find-bug ($perl6-command) {
+sub capture-stderr ($command) {
 
     my $bug-file = '/tmp/perl6fix.bugs';
 
     unlink($bug-file);
+     	
+    # run and capture any STDERR into a file
+    # display any errors in default Perl6 style 
+    qqx{$command 2> $bug-file};	
+    
+    return $bug-file.IO.slurp;	
 
-    # re-run the previous command and capture any STDERR into a file
-    qqx{$perl6-command 2> $bug-file};
+}
 
-    return unless my $bug-description = $bug-file.IO.slurp;
+sub find-bug ($perl6-command) {
 
-    # can we find a filename and line number?
-    return unless $bug-description ~~ m/^^ 'at' \s+ (.*?) ':' (.*?) $$/;
+    return unless my $error-output = capture-stderr($perl6-command);
 
-    my $filename    = ~$0;
-    my $line-number = ~$1;
+    # show the error
+    note($error-output);	
 
-    return Bug.new(
-        description =>  $bug-description,
-        source-file =>  SourceFile.new($filename),
-        line-number =>  $line-number
-    );
+    # re-run the command again - this time grabbing a JSON version of the bug
+    # set RAKUDO_EXCEPTIONS_HANDLER env var to JSON 
+    return unless my $error-as-json   = capture-stderr('RAKUDO_EXCEPTIONS_HANDLER=JSON ' ~ $perl6-command);
+    return unless my $bug-description = from-json($error-as-json);
+
+    # just handle these exception types to start with	
+    for 'X::Syntax::Confused', 'X::Obsolete' -> $bug-type {
+	
+	next unless my $bug = $bug-description{$bug-type};	
+	return Bug.new(
+	    description =>  $bug<message>,
+            source-file =>  SourceFile.new($bug<filename>),
+	    line-number =>  $bug<line>,
+            pre-context =>  $bug<pre>
+    	);
+    }
 }
 
 
